@@ -1,3 +1,5 @@
+import { startTestCall } from './test-call.js';
+
 const $ = (id) => document.getElementById(id);
 
 const store = {
@@ -98,6 +100,8 @@ $('title').addEventListener('pointerup', () => {
   }
 });
 
+$('close-setup').addEventListener('click', () => $('setup-card').classList.remove('show'));
+
 // --- Setup status (automatic) -------------------------------------------------
 
 function statusRow(state, label, value, hint) {
@@ -118,27 +122,27 @@ async function loadStatus() {
   const s = await api('GET', '/api/status');
   const rows = [];
 
-  rows.push(statusRow(s.telnyxKey ? 'ok' : 'bad', 'Telnyx key', s.telnyxKey ? 'Connected' : 'Missing'));
-  rows.push(statusRow(s.geminiKey ? 'ok' : 'bad', 'Gemini key', s.geminiKey ? `Connected · ${s.model}` : 'Missing'));
+  rows.push(statusRow(s.callingKey ? 'ok' : 'bad', 'Calling service', s.callingKey ? 'Connected' : 'Key missing'));
+  rows.push(statusRow(s.aiKey ? 'ok' : 'bad', 'AI voice', s.aiKey ? 'Connected' : 'Key missing'));
   rows.push(statusRow(s.publicUrl ? 'ok' : 'warn', 'Online address', s.publicUrl || 'Running on this computer',
     s.publicUrl ? null : 'Calls work only on the online (Render) version.'));
   rows.push(s.app
-    ? statusRow('ok', 'Telnyx call app', s.app.name)
-    : statusRow('warn', 'Telnyx call app', 'Not yet', 'Created automatically when the online version starts.'));
+    ? statusRow('ok', 'Calling app', 'Ready')
+    : statusRow('warn', 'Calling app', 'Not yet', 'Created automatically when the online version starts.'));
   if (s.profile) {
     const missing = s.autoCountries.filter((c) => !s.profile.destinations.includes(c));
     rows.push(statusRow(missing.length ? 'warn' : 'ok', 'Countries you can call', s.profile.destinations.join(', ') || 'None',
       missing.length ? `${missing.join(', ')} will be added automatically.` : 'Any other country is added automatically when you call it.'));
   }
-  if (s.balance) rows.push(statusRow('ok', 'Telnyx balance', `${s.balance.amount} ${s.balance.currency}`));
+  if (s.balance) rows.push(statusRow('ok', 'Calling credit', `${s.balance.amount} ${s.balance.currency}`));
   for (const warning of s.warnings) rows.push(statusRow('bad', 'Needs your action', '', warning));
-  for (const error of s.errors) rows.push(statusRow('bad', 'Telnyx problem', '', error));
+  for (const error of s.errors) rows.push(statusRow('bad', 'Calling service problem', '', error));
   $('status-rows').replaceChildren(...rows);
 
   const problems = [];
-  if (!s.telnyxKey) problems.push('the Telnyx key is missing');
-  if (!s.geminiKey) problems.push('the Gemini key is missing');
-  if (s.errors.length) problems.push('Telnyx reported a problem');
+  if (!s.callingKey) problems.push('the calling service key is missing');
+  if (!s.aiKey) problems.push('the AI voice key is missing');
+  if (s.errors.length) problems.push('the calling service reported a problem');
   let text = '';
   if (s.warnings.length) text = s.warnings.join(' ');
   else if (problems.length) text = `Setup needs attention: ${problems.join(', ')}. Double-tap "Voice Bridge" for details.`;
@@ -181,7 +185,7 @@ async function loadCallerIds(select) {
       ? callerIds.map((c) =>
           el('div', { className: 'num' },
             el('span', { textContent: c.number }),
-            el('span', { className: 'badge', textContent: c.kind === 'owned' ? 'Telnyx number' : 'Ready' })))
+            el('span', { className: 'badge', textContent: c.kind === 'owned' ? 'Company number' : 'Ready' })))
       : [el('div', { className: 'empty', textContent: 'No number added yet. Add yours below.' })])
   );
 
@@ -275,9 +279,37 @@ $('hangup-btn').addEventListener('click', (e) =>
   withBusy(e.currentTarget, async () => {
     if (!live.callId) return;
     try {
+      testCall?.stop();
       await api('POST', `/api/calls/${encodeURIComponent(live.callId)}/hangup`);
     } catch (err) {
       showMsg($('call-msg'), 'bad', err.message);
+    }
+  })
+);
+
+// --- Test call in the browser -------------------------------------------------
+
+let testCall = null;
+
+$('test-btn').addEventListener('click', (e) =>
+  withBusy(e.currentTarget, async () => {
+    hideMsg($('call-msg'));
+    try {
+      const { callId } = await api('POST', '/api/test-calls');
+      live.callId = callId;
+      testCall = await startTestCall({
+        callId,
+        onEnd() {
+          testCall = null;
+          api('POST', `/api/calls/${encodeURIComponent(callId)}/hangup`).catch(() => {});
+        },
+      });
+    } catch (err) {
+      const denied = err.name === 'NotAllowedError' || err.name === 'NotFoundError';
+      showMsg($('call-msg'), 'bad', denied ? 'Please allow microphone access to start the test call.' : err.message);
+      if (live.callId?.startsWith('test-')) {
+        api('POST', `/api/calls/${encodeURIComponent(live.callId)}/hangup`).catch(() => {});
+      }
     }
   })
 );
@@ -313,9 +345,10 @@ function renderTimeline() {
     }),
     ...(live.state === 'error' ? [el('span', { className: 'step failed', textContent: 'Problem' })] : [])
   );
-  const active = live.callId && !['ended', 'error'].includes(live.state);
+  const active = Boolean(live.callId && live.state && !['ended', 'error'].includes(live.state));
   $('hangup-btn').hidden = !active;
   $('call-btn').hidden = active;
+  $('test-btn').disabled = active;
 }
 
 function addNote(text) {
@@ -331,7 +364,9 @@ function scrollTranscript() {
 
 function handleEvent(event) {
   if (event.type === 'call') {
-    if (event.state === 'dialing') resetLive(event.callId, `From ${event.from} to ${event.to}`);
+    if (event.state === 'dialing') {
+      resetLive(event.callId, event.test ? 'Test call in your browser' : `From ${event.from} to ${event.to}`);
+    }
     if (event.callId !== live.callId) return;
     live.state = event.state;
     live.reached.add(event.state);
@@ -339,8 +374,12 @@ function handleEvent(event) {
     if (event.state === 'ended') {
       addNote(`Call ended${event.detail ? ` (${event.detail})` : ''}`);
       hideMsg($('call-msg'));
+      testCall?.stop();
     }
-    if (event.state === 'error') addNote(event.detail || 'Something went wrong');
+    if (event.state === 'error') {
+      addNote(event.detail || 'Something went wrong');
+      testCall?.stop();
+    }
     return;
   }
 

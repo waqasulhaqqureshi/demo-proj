@@ -51,6 +51,7 @@
     }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
     .card h2 { font-size: 16px; margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .head-actions { display: flex; gap: 6px; }
     .card .lead { margin: 4px 0 14px; color: var(--muted); font-size: 13.5px; }
     .wide { grid-column: 1 / -1; }
     .notice {
@@ -154,7 +155,12 @@
     <div class="notice" id="notice"></div>
 
     <section class="card wide" id="setup-card" aria-label="Setup">
-      <h2>Setup <button class="secondary small" id="rerun-setup">Run setup again</button></h2>
+      <h2>Setup
+        <span class="head-actions">
+          <button class="secondary small" id="rerun-setup">Run setup again</button>
+          <button class="secondary small" id="close-setup" aria-label="Close setup">Close</button>
+        </span>
+      </h2>
       <p class="lead">Everything here is set up automatically. This panel is only for checking.</p>
       <div class="rows" id="status-rows"><div class="empty">Loading…</div></div>
       <div class="msg" id="setup-msg"></div>
@@ -203,6 +209,11 @@
         </div>
       </form>
       <div class="msg" id="call-msg"></div>
+
+      <div class="divider"></div>
+      <label>Try it without a phone</label>
+      <p class="lead">Talk to the AI right here with your microphone. It sounds exactly like a phone call. Headphones work best.</p>
+      <div class="actions"><button type="button" class="secondary" id="test-btn">Start test call</button></div>
     </section>
 
     <section class="card wide">
@@ -214,5 +225,6 @@
   </main>
 
   <script type="module" src="app.js"></script>
+
 </body>
 </html>

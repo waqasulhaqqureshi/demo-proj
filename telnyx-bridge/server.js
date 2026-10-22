@@ -58,11 +58,20 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// The UI never names the telephony vendor; full details stay in the server logs.
+const toClientText = (message) =>
+  String(message)
+    .replace(/(refer to )?https?:\/\/\S*telnyx\S*/gi, '')
+    .replace(/TELNYX_API_KEY/g, 'calling service key')
+    .replace(/telnyx/gi, 'calling service')
+    .replace(/\s+([.,;])/g, '$1')
+    .trim();
+
 const wrap = (handler) => (req, res) =>
   handler(req, res).catch((err) => {
     const status = err instanceof tx.TelnyxError && err.status < 500 ? 400 : 500;
     console.error(`[api] ${req.method} ${req.path}:`, err.message);
-    res.status(status).json({ error: err.message });
+    res.status(status).json({ error: toClientText(err.message) });
   });
 
 app.use('/api', requireAdmin);
@@ -96,11 +105,12 @@ function ensureTelnyxSetup(extraCountries = []) {
         changes.push(`allowed calls to ${missing.join(', ')} on profile "${profile.name}"`);
       } catch (err) {
         blocked = missing;
+        console.warn(`[setup] could not allow ${missing.join(', ')}: ${err.message}`);
         // 10039: the account level doesn't permit these destinations yet.
         warnings.push(
           err.errors?.some((e) => String(e.code) === '10039')
-            ? `Your Telnyx account must be upgraded before it can call ${describeCountries(missing)}. Upgrade at https://telnyx.com/upgrade, and the countries will be added automatically afterwards.`
-            : `Could not allow calls to ${describeCountries(missing)}: ${err.message}`
+            ? `The calling account needs an upgrade before it can call ${describeCountries(missing)}. Once it's upgraded, they are added automatically.`
+            : `Could not allow calls to ${describeCountries(missing)}: ${toClientText(err.message)}`
         );
       }
     }
@@ -119,7 +129,6 @@ function ensureTelnyxSetup(extraCountries = []) {
     }
 
     for (const change of changes) console.log(`[setup] ${change}`);
-    for (const warning of warnings) console.warn(`[setup] ${warning}`);
     lastSetupWarnings = warnings;
     return { app: callApp, changes, warnings, blocked };
   });
@@ -131,8 +140,8 @@ app.get(
   '/api/status',
   wrap(async (_req, res) => {
     const status = {
-      telnyxKey: Boolean(process.env.TELNYX_API_KEY),
-      geminiKey: Boolean(process.env.GEMINI_API_KEY),
+      callingKey: Boolean(process.env.TELNYX_API_KEY),
+      aiKey: Boolean(process.env.GEMINI_API_KEY),
       publicUrl: publicUrl() || null,
       model: process.env.GEMINI_MODEL || 'gemini-3.8-live',
       voice: process.env.GEMINI_VOICE || 'Kore',
@@ -144,7 +153,7 @@ app.get(
       balance: null,
       errors: [],
     };
-    if (!status.telnyxKey) return res.json(status);
+    if (!status.callingKey) return res.json(status);
 
     const [appResult, balanceResult] = await Promise.allSettled([
       tx.resolveCallControlApp({ refresh: true }),
@@ -152,14 +161,14 @@ app.get(
     ]);
     if (appResult.status === 'fulfilled' && appResult.value) {
       const a = appResult.value;
-      status.app = { id: a.id, name: a.application_name, webhookUrl: a.webhook_event_url || null };
+      status.app = { id: a.id, name: a.application_name };
     } else if (appResult.status === 'rejected') {
-      status.errors.push(`Call Control Apps: ${appResult.reason.message}`);
+      status.errors.push(`Calling app: ${toClientText(appResult.reason.message)}`);
     }
     if (balanceResult.status === 'fulfilled') {
       status.balance = { amount: balanceResult.value.balance, currency: balanceResult.value.currency };
     } else {
-      status.errors.push(`Balance: ${balanceResult.reason.message}`);
+      status.errors.push(`Credit: ${toClientText(balanceResult.reason.message)}`);
     }
 
     try {
@@ -168,7 +177,7 @@ app.get(
         status.profile = { id: profile.id, name: profile.name, destinations: profile.whitelisted_destinations || [] };
       }
     } catch (err) {
-      status.errors.push(`Outbound voice profiles: ${err.message}`);
+      status.errors.push(`Allowed countries: ${toClientText(err.message)}`);
     }
     res.json(status);
   })
@@ -243,7 +252,7 @@ const placeCall = wrap(async (req, res) => {
   // Opens the destination's country and makes sure the call app exists.
   const { app: callApp, blocked, warnings } = await ensureTelnyxSetup(target.country ? [target.country] : []);
   if (blocked.includes(target.country)) return res.status(400).json({ error: warnings.join(' ') });
-  if (!callApp) return res.status(500).json({ error: 'Could not set up the Telnyx call app. Check the server logs.' });
+  if (!callApp) return res.status(500).json({ error: 'Could not set up the calling app. Check the server logs.' });
 
   const to = target.e164;
   const from = caller.e164;
@@ -260,10 +269,27 @@ app.post('/make-call', requireAdmin, placeCall);
 app.post(
   '/api/calls/:id/hangup',
   wrap(async (req, res) => {
-    await tx.hangup(req.params.id);
+    if (req.params.id.startsWith('test-')) endTestCall(req.params.id, 'Test finished');
+    else await tx.hangup(req.params.id);
     res.json({ ok: true });
   })
 );
+
+// Browser test calls: the page streams microphone audio over /media in the same
+// format the phone network uses, so the whole bridge runs without a real call.
+app.post('/api/test-calls', (_req, res) => {
+  const callId = `test-${crypto.randomUUID()}`;
+  activeCalls.set(callId, { test: true, state: 'dialing' });
+  publish('call', { callId, state: 'dialing', test: true });
+  console.log(`[call] browser test started (${callId})`);
+  res.json({ callId });
+});
+
+function endTestCall(callId, detail) {
+  if (!activeCalls.get(callId)?.test) return;
+  setCallState(callId, 'ended', { detail });
+  activeCalls.delete(callId);
+}
 
 // --- Live event feed (SSE) ---------------------------------------------------
 
@@ -335,6 +361,9 @@ function bridgeCall(telnyxWs) {
   const downsample = createDownsampler();
   let callId = null;
   let gemini = null;
+  // Set once the stream is closing normally, so the AI session closing with it
+  // isn't reported as a failure.
+  let ending = false;
   let inboundBatch = [];
   let inboundBytes = 0;
   let outbound = Buffer.alloc(0);
@@ -392,9 +421,10 @@ function bridgeCall(telnyxWs) {
       onClose(code, reason) {
         console.log(`[gemini] closed ${code} ${reason} (${callId})`);
         flushTranscriptLog();
-        if (activeCalls.has(callId)) {
+        if (!ending && activeCalls.has(callId)) {
           setCallState(callId, 'error', { detail: `AI session closed (${code}${reason ? `: ${reason}` : ''})` });
-          tx.hangup(callId).catch(() => {});
+          if (activeCalls.get(callId).test) activeCalls.delete(callId);
+          else tx.hangup(callId).catch(() => {});
         }
         if (telnyxWs.readyState === telnyxWs.OPEN) telnyxWs.close();
       },
@@ -418,6 +448,7 @@ function bridgeCall(telnyxWs) {
           return;
         }
         console.log(`[media] stream started (${callId}) format=${JSON.stringify(msg.start?.media_format || {})}`);
+        if (activeCalls.get(callId).test) setCallState(callId, 'answered');
         startGemini();
         break;
 
@@ -437,6 +468,8 @@ function bridgeCall(telnyxWs) {
 
       case 'stop':
         console.log(`[media] stream stopped (${callId})`);
+        ending = true;
+        endTestCall(callId, 'Test finished');
         gemini?.close();
         break;
 
@@ -446,7 +479,11 @@ function bridgeCall(telnyxWs) {
     }
   });
 
-  telnyxWs.on('close', () => gemini?.close());
+  telnyxWs.on('close', () => {
+    ending = true;
+    endTestCall(callId, 'Test finished');
+    gemini?.close();
+  });
   telnyxWs.on('error', (err) => console.error('[media] socket error:', err.message));
 }
 

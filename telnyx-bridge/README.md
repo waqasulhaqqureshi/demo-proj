@@ -49,6 +49,12 @@ On startup (and before every call) the server:
 
 The status panel is hidden; double-tap (or double-click) the **Voice Bridge** title to show it.
 
+## Test without a phone
+
+**Start test call** (in the "Call someone" card) talks to the AI through your microphone. The page sends μ-law 8 kHz frames over `/media` exactly like a Telnyx media stream, so the whole bridge (codec, Gemini, barge-in, transcripts) runs without dialing. It works locally too, and needs no Telnyx account upgrade.
+
+The UI never shows the telephony vendor's name (error text is neutralised by `toClientText` in `server.js`); the server logs keep full details.
+
 ## First call
 
 In the UI:
