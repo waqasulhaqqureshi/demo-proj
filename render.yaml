@@ -1,6 +1,6 @@
 # Render Blueprint for the Telnyx ↔ Gemini Live voice bridge (telnyx-bridge/).
 # Apply it at https://dashboard.render.com/blueprint/new — Render will ask for
-# the two API keys (sync: false) and generate ADMIN_TOKEN for the UI login.
+# the two API keys and ADMIN_TOKEN (the UI password); none of them live in git.
 services:
   - type: web
     name: telnyx-gemini-bridge
@@ -17,7 +17,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: ADMIN_TOKEN
-        generateValue: true
+        sync: false
       - key: AUTO_ALLOW_COUNTRIES
         value: PK,AE
       - key: GEMINI_MODEL

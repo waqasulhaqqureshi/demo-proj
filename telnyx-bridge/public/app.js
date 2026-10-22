@@ -25,7 +25,7 @@ async function api(method, path, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
-    showLogin('That access code didn\'t work. Please try again.');
+    showLogin('That password didn\'t work. Please try again.');
     throw new Error('Unauthorized');
   }
   if (!res.ok) throw new Error(data.error || `Something went wrong (HTTP ${res.status}).`);
@@ -367,7 +367,7 @@ async function streamEvents() {
   for (;;) {
     try {
       const res = await fetch('/api/events', { headers: { Authorization: `Bearer ${token}` } });
-      if (res.status === 401) return showLogin('That access code didn\'t work. Please try again.');
+      if (res.status === 401) return showLogin('That password didn\'t work. Please try again.');
       resetLive(null, 'No call yet.');
       renderTimeline();
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();

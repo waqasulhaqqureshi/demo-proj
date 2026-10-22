@@ -32,13 +32,13 @@ cp .env.example .env   # then fill in the keys
 npm start              # http://localhost:8080
 ```
 
-Sign in with `ADMIN_TOKEN`. Locally you can verify caller IDs and allow destination countries. Placing calls needs Telnyx to reach the server, so use the Render deploy (or set `PUBLIC_URL` to an https tunnel such as ngrok).
+Sign in with the `ADMIN_TOKEN` password. Locally you can verify caller IDs and allow destination countries. Placing calls needs Telnyx to reach the server, so use the Render deploy (or set `PUBLIC_URL` to an https tunnel such as ngrok).
 
 ## Deploy to Render
 
 1. Push this repo to GitHub (the Blueprint is `render.yaml` at the repo root).
-2. Open `https://dashboard.render.com/blueprint/new?repo=<your GitHub repo URL>`, paste `TELNYX_API_KEY` and `GEMINI_API_KEY`, and click **Apply**.
-3. When the deploy is live, copy `ADMIN_TOKEN` from the service's **Environment** tab and open the service URL.
+2. Open `https://dashboard.render.com/blueprint/new?repo=<your GitHub repo URL>`, paste `TELNYX_API_KEY` and `GEMINI_API_KEY`, choose a password for `ADMIN_TOKEN`, and click **Apply**.
+3. When the deploy is live, open the service URL and sign in with that password.
 
 ## Automatic Telnyx setup
 
