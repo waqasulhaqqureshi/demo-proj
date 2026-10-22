@@ -1,0 +1,31 @@
+# Render Blueprint for the Telnyx ↔ Gemini Live voice bridge (telnyx-bridge/).
+# Apply it at https://dashboard.render.com/blueprint/new — Render will ask for
+# the two API keys (sync: false) and generate ADMIN_TOKEN for the UI login.
+services:
+  - type: web
+    name: telnyx-gemini-bridge
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: telnyx-bridge
+    buildCommand: npm ci
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: TELNYX_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: GEMINI_MODEL
+        value: gemini-3.8-live
+      - key: GEMINI_VOICE
+        value: Kore
+      - key: SYSTEM_PROMPT
+        value: >-
+          You are a friendly, professional AI voice assistant on a phone call.
+          As soon as the call starts, greet the person warmly in Arabic, say you are an AI assistant, and ask how you can help.
+          After that, always reply in the language the person is speaking: Arabic if they speak Arabic, English if they speak English.
+          Keep every reply short and conversational, one or two sentences, because this is a phone call.
+          Never use lists, markdown, or emojis.
