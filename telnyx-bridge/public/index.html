@@ -3,206 +3,210 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
   <title>Voice Bridge</title>
   <style>
     :root {
-      --bg: #f6f7f9;
+      --page: #ffffff;
+      --tint: #f2fbf5;
       --surface: #ffffff;
-      --border: #e3e6eb;
-      --text: #1a1d23;
-      --muted: #667085;
-      --accent: #2f6fed;
-      --accent-text: #ffffff;
-      --ok: #1a7f4b;
-      --ok-bg: #e6f4ec;
-      --bad: #b42318;
-      --bad-bg: #fdecea;
-      --warn: #a15c07;
-      --warn-bg: #fdf3e2;
-      --bubble-ai: #eef3fe;
-      --bubble-caller: #f1f2f4;
-      --radius: 12px;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0f1115;
-        --surface: #171a21;
-        --border: #2a2f3a;
-        --text: #e7e9ee;
-        --muted: #98a1b2;
-        --accent: #5b8cff;
-        --accent-text: #0b0d12;
-        --ok: #4cc38a;
-        --ok-bg: #12291e;
-        --bad: #ff7a6e;
-        --bad-bg: #331512;
-        --warn: #f0b35a;
-        --warn-bg: #30230f;
-        --bubble-ai: #1b2740;
-        --bubble-caller: #22262f;
-      }
+      --border: #dcefe3;
+      --border-strong: #b9e3c8;
+      --text: #17261d;
+      --muted: #5f7368;
+      --green: #1f9d55;
+      --green-dark: #167a41;
+      --green-soft: #e3f6ea;
+      --green-softer: #f2fbf5;
+      --red: #c0362c;
+      --red-soft: #fdeceb;
+      --amber: #9a6100;
+      --amber-soft: #fff4dc;
+      --radius: 14px;
+      --shadow: 0 1px 2px rgba(23, 38, 29, .04), 0 4px 16px rgba(23, 38, 29, .05);
     }
     * { box-sizing: border-box; }
+    html { background: var(--page); }
     body {
       margin: 0;
-      background: var(--bg);
+      min-height: 100vh;
+      background: linear-gradient(180deg, var(--tint) 0, var(--page) 260px);
       color: var(--text);
       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
-    header {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      max-width: 1100px; margin: 0 auto; padding: 20px 16px 8px;
+    header { max-width: 1060px; margin: 0 auto; padding: 28px 16px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 12px; background: var(--green-soft); color: var(--green);
+      display: grid; place-items: center; flex: none;
     }
-    header h1 { font-size: 20px; margin: 0; }
-    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    #title {
+      font-size: 22px; margin: 0; letter-spacing: -0.01em;
+      user-select: none; -webkit-user-select: none; touch-action: manipulation; cursor: default;
+    }
+    header p { margin: 1px 0 0; color: var(--muted); font-size: 13.5px; }
     main {
-      max-width: 1100px; margin: 0 auto; padding: 8px 16px 40px;
-      display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      align-items: start;
+      max-width: 1060px; margin: 0 auto; padding: 8px 16px 48px;
+      display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start;
     }
-    .card {
-      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: 16px;
-    }
-    .card h2 { font-size: 15px; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+    .card h2 { font-size: 16px; margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .card .lead { margin: 4px 0 14px; color: var(--muted); font-size: 13.5px; }
     .wide { grid-column: 1 / -1; }
-    .rows { display: grid; gap: 8px; }
+    .notice {
+      grid-column: 1 / -1; display: none; padding: 10px 14px; border-radius: 10px;
+      background: var(--amber-soft); color: var(--amber); font-size: 13.5px;
+    }
+    .notice.show { display: block; }
+    .notice a { color: inherit; font-weight: 600; }
+    .rows { display: grid; gap: 4px; margin-top: 12px; }
     .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; }
     .row .label { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .row .value { color: var(--muted); font-size: 13px; text-align: right; overflow-wrap: anywhere; }
     .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--muted); }
-    .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); }
-    .hint { font-size: 12.5px; color: var(--muted); margin: 2px 0 0 17px; }
-    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    .dot.ok { background: var(--green); } .dot.bad { background: var(--red); } .dot.warn { background: #e0a100; }
+    .hint { font-size: 12.5px; color: var(--muted); margin: 0 0 6px 17px; }
+    label { display: block; font-size: 13.5px; font-weight: 600; margin: 14px 0 6px; }
     input, select {
-      width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
-      background: var(--bg); color: var(--text); font: inherit;
+      width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--border-strong);
+      background: #fff; color: var(--text); font: inherit; font-size: 16px;
     }
-    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    input::placeholder { color: #9aaca1; }
+    input:focus, select:focus { outline: 3px solid var(--green-soft); border-color: var(--green); }
     button {
-      font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 14px; cursor: pointer;
-      border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
+      font: inherit; font-weight: 600; border-radius: 10px; padding: 11px 18px; cursor: pointer;
+      border: 1px solid var(--green); background: var(--green); color: #fff;
     }
-    button.secondary { background: transparent; color: var(--accent); }
-    button.small { padding: 5px 10px; font-size: 13px; }
-    button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
-    button:disabled { opacity: .5; cursor: default; }
-    .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-    .segmented { display: flex; gap: 6px; }
-    .segmented label {
-      flex: 1; margin: 0; padding: 8px; text-align: center; border: 1px solid var(--border);
-      border-radius: 8px; cursor: pointer; color: var(--text);
+    button:hover { background: var(--green-dark); border-color: var(--green-dark); }
+    button.secondary { background: #fff; color: var(--green-dark); border-color: var(--border-strong); }
+    button.secondary:hover { background: var(--green-softer); }
+    button.small { padding: 6px 12px; font-size: 13px; }
+    button.danger { background: var(--red); border-color: var(--red); }
+    button:disabled { opacity: .55; cursor: default; }
+    .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    .actions button { flex: 1 1 auto; }
+    .choice { display: flex; gap: 8px; }
+    .choice label {
+      position: relative; flex: 1; margin: 0; padding: 10px; text-align: center; font-weight: 500; border: 1px solid var(--border-strong);
+      border-radius: 10px; cursor: pointer; background: #fff;
     }
-    .segmented input { display: none; }
-    .segmented input:checked + span { color: var(--accent); font-weight: 600; }
-    .segmented label:has(input:checked) { border-color: var(--accent); }
-    .msg { font-size: 13px; margin-top: 10px; padding: 8px 10px; border-radius: 8px; display: none; }
+    .choice input { position: absolute; opacity: 0; pointer-events: none; }
+    .choice label:has(input:checked) { border-color: var(--green); background: var(--green-soft); color: var(--green-dark); font-weight: 600; }
+    .msg { font-size: 13.5px; margin-top: 12px; padding: 9px 12px; border-radius: 10px; display: none; }
     .msg.show { display: block; }
-    .msg.ok { background: var(--ok-bg); color: var(--ok); }
-    .msg.bad { background: var(--bad-bg); color: var(--bad); }
+    .msg.ok { background: var(--green-soft); color: var(--green-dark); }
+    .msg.bad { background: var(--red-soft); color: var(--red); }
     .list { display: grid; gap: 6px; }
     .num {
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
-      padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-variant-numeric: tabular-nums;
+      padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--green-softer);
+      font-variant-numeric: tabular-nums; font-weight: 600;
     }
-    .badge { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; background: var(--ok-bg); color: var(--ok); }
-    .badge.owned { background: var(--bubble-ai); color: var(--accent); }
-    .empty { color: var(--muted); font-size: 13px; }
-    .timeline { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-    .step {
-      font-size: 12.5px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted);
-    }
-    .step.done { color: var(--ok); border-color: var(--ok); }
-    .step.current { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
-    .step.failed { color: #fff; background: var(--bad); border-color: var(--bad); }
-    .call-meta { font-size: 13px; color: var(--muted); margin-bottom: 10px; overflow-wrap: anywhere; }
-    .transcript {
-      display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto;
-      padding: 4px 2px;
-    }
-    .bubble { max-width: 85%; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .bubble.ai { background: var(--bubble-ai); align-self: flex-start; }
-    .bubble.caller { background: var(--bubble-caller); align-self: flex-end; }
-    .bubble .who { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
-    .system-note { align-self: center; font-size: 12px; color: var(--muted); }
-    #login {
-      position: fixed; inset: 0; background: var(--bg); display: none; align-items: center; justify-content: center; padding: 16px;
-    }
+    .badge { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 99px; background: var(--green-soft); color: var(--green-dark); }
+    .empty { color: var(--muted); font-size: 13.5px; padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: 10px; }
+    .divider { height: 1px; background: var(--border); margin: 18px 0 2px; }
+    .timeline { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+    .step { font-size: 12.5px; padding: 4px 12px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted); background: #fff; }
+    .step.done { color: var(--green-dark); border-color: var(--border-strong); background: var(--green-softer); }
+    .step.current { color: #fff; background: var(--green); border-color: var(--green); }
+    .step.failed { color: #fff; background: var(--red); border-color: var(--red); }
+    .call-meta { font-size: 13.5px; color: var(--muted); margin-bottom: 10px; overflow-wrap: anywhere; }
+    .transcript { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; padding: 2px; }
+    .bubble { max-width: 85%; padding: 9px 13px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .bubble.ai { background: var(--green-soft); align-self: flex-start; border-bottom-left-radius: 4px; }
+    .bubble.caller { background: #f1f3f2; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .bubble .who { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }
+    .system-note { align-self: center; font-size: 12.5px; color: var(--muted); }
+    #setup-card { display: none; border-style: dashed; }
+    #setup-card.show { display: block; }
+    #login { position: fixed; inset: 0; background: linear-gradient(180deg, var(--tint), var(--page)); display: none; align-items: center; justify-content: center; padding: 16px; }
     #login.show { display: flex; }
     #login .card { width: 100%; max-width: 380px; }
-    code { font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+    code { font-size: 12.5px; background: var(--green-softer); padding: 1px 5px; border-radius: 4px; }
   </style>
 </head>
 <body>
   <div id="login">
     <form class="card" id="login-form">
       <h2>Voice Bridge</h2>
-      <p class="empty" style="margin:0">Enter the <code>ADMIN_TOKEN</code> from the server's environment (Render → Environment, or <code>telnyx-bridge/.env</code> locally).</p>
-      <label for="token">Admin token</label>
+      <p class="lead">Enter your access code to continue. It's the <code>ADMIN_TOKEN</code> value in Render → Environment (or <code>telnyx-bridge/.env</code> on your computer).</p>
+      <label for="token">Access code</label>
       <input id="token" type="password" autocomplete="current-password" required>
-      <div class="actions"><button type="submit">Sign in</button></div>
+      <div class="actions"><button type="submit">Continue</button></div>
       <div class="msg bad" id="login-msg"></div>
     </form>
   </div>
 
   <header>
-    <div>
-      <h1>Voice Bridge</h1>
-      <p>Telnyx calls answered by Gemini Live</p>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      </div>
+      <div>
+        <h1 id="title">Voice Bridge</h1>
+        <p>AI phone calls in Arabic and English</p>
+      </div>
     </div>
     <button class="secondary small" id="logout">Sign out</button>
   </header>
 
   <main>
-    <section class="card">
-      <h2>Setup <button class="secondary small" id="refresh-status">Refresh</button></h2>
+    <div class="notice" id="notice"></div>
+
+    <section class="card wide" id="setup-card" aria-label="Setup">
+      <h2>Setup <button class="secondary small" id="rerun-setup">Run setup again</button></h2>
+      <p class="lead">Everything here is set up automatically. This panel is only for checking.</p>
       <div class="rows" id="status-rows"><div class="empty">Loading…</div></div>
       <div class="msg" id="setup-msg"></div>
     </section>
 
     <section class="card">
-      <h2>Caller IDs <button class="secondary small" id="refresh-ids">Refresh</button></h2>
+      <h2>Your number <button class="secondary small" id="refresh-ids">Refresh</button></h2>
+      <p class="lead">This is the number people see when you call them. Add it once and we'll send it a code to confirm it's yours.</p>
       <div class="list" id="caller-ids"><div class="empty">Loading…</div></div>
 
+      <div class="divider"></div>
+
       <form id="verify-form">
-        <label for="verify-number">Verify a new number</label>
-        <input id="verify-number" placeholder="+923001234567" inputmode="tel" required>
-        <label>Send the code by</label>
-        <div class="segmented">
-          <label><input type="radio" name="method" value="sms" checked><span>SMS</span></label>
-          <label><input type="radio" name="method" value="call"><span>Voice call</span></label>
+        <label for="verify-number">Enter the number you'll call from</label>
+        <input id="verify-number" placeholder="+92 300 1234567" inputmode="tel" autocomplete="tel" required>
+        <label>How should we send the code?</label>
+        <div class="choice">
+          <label><input type="radio" name="method" value="sms" checked>Text message</label>
+          <label><input type="radio" name="method" value="call">Phone call</label>
         </div>
-        <div class="actions"><button type="submit" id="send-code">Send code</button></div>
+        <div class="actions"><button type="submit" id="send-code">Send me a code</button></div>
       </form>
 
       <form id="confirm-form" hidden>
-        <label for="verify-code">Code sent to <span id="confirm-number"></span></label>
-        <input id="verify-code" inputmode="numeric" autocomplete="one-time-code" required>
+        <label for="verify-code">Type the code we sent to <span id="confirm-number"></span></label>
+        <input id="verify-code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required>
         <div class="actions">
-          <button type="submit">Verify</button>
-          <button type="button" class="secondary" id="cancel-verify">Cancel</button>
+          <button type="submit">Confirm</button>
+          <button type="button" class="secondary" id="cancel-verify">Use a different number</button>
         </div>
       </form>
       <div class="msg" id="verify-msg"></div>
     </section>
 
     <section class="card">
-      <h2>Place a call</h2>
+      <h2>Call someone</h2>
+      <p class="lead">Enter their number and the AI assistant will call and talk with them.</p>
       <form id="call-form">
-        <label for="from">From (caller ID)</label>
+        <label for="from">Call from</label>
         <select id="from" required></select>
-        <label for="to">To</label>
-        <input id="to" placeholder="+923001234567" inputmode="tel" required>
+        <label for="to">Number to call</label>
+        <input id="to" placeholder="+92 300 1234567" inputmode="tel" autocomplete="off" required>
         <div class="actions">
-          <button type="submit" id="call-btn">Call</button>
-          <button type="button" class="danger" id="hangup-btn" hidden>Hang up</button>
+          <button type="submit" id="call-btn">Call now</button>
+          <button type="button" class="danger" id="hangup-btn" hidden>End call</button>
         </div>
       </form>
       <div class="msg" id="call-msg"></div>
     </section>
 
     <section class="card wide">
-      <h2>Live call</h2>
+      <h2>Conversation</h2>
       <div class="timeline" id="timeline"></div>
       <div class="call-meta" id="call-meta">No call yet.</div>
       <div class="transcript" id="transcript"></div>

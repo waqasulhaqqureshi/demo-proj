@@ -90,6 +90,16 @@ export async function createCallControlApp({ webhookUrl, outboundVoiceProfileId 
   return data;
 }
 
+export async function updateCallControlAppWebhook(app, webhookUrl) {
+  const { data } = await telnyx('PATCH', `/call_control_applications/${app.id}`, {
+    application_name: app.application_name,
+    webhook_event_url: webhookUrl,
+    webhook_api_version: '2',
+  });
+  cachedApp = data;
+  return data;
+}
+
 export async function allowDestinations(profile, countries) {
   const destinations = [...new Set([...(profile.whitelisted_destinations || []), ...countries])];
   const { data } = await telnyx('PATCH', `/outbound_voice_profiles/${profile.id}`, {
@@ -137,20 +147,3 @@ export async function startStreaming(callControlId, streamUrl) {
 export async function hangup(callControlId) {
   return telnyx('POST', `/calls/${encodeURIComponent(callControlId)}/actions/hangup`, {});
 }
-
-// --- Helpers ---------------------------------------------------------------
-
-// Calling codes for the destinations this project is likely to dial. Unknown
-// prefixes return null and skip the client-side destination check.
-const CALLING_CODES = [
-  ['971', 'AE'], ['966', 'SA'], ['974', 'QA'], ['973', 'BH'], ['968', 'OM'], ['965', 'KW'],
-  ['92', 'PK'], ['91', 'IN'], ['44', 'GB'], ['49', 'DE'], ['33', 'FR'], ['61', 'AU'], ['1', 'US'],
-];
-
-export function countryOf(e164) {
-  const digits = e164.replace(/^\+/, '');
-  const match = CALLING_CODES.find(([code]) => digits.startsWith(code));
-  return match ? match[1] : null;
-}
-
-export const isE164 = (value) => typeof value === 'string' && /^\+[1-9]\d{6,14}$/.test(value);

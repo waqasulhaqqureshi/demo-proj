@@ -25,10 +25,10 @@ async function api(method, path, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
-    showLogin('That token was rejected. Sign in again.');
+    showLogin('That access code didn\'t work. Please try again.');
     throw new Error('Unauthorized');
   }
-  if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(data.error || `Something went wrong (HTTP ${res.status}).`);
   return data;
 }
 
@@ -85,96 +85,93 @@ $('logout').addEventListener('click', () => {
   location.reload();
 });
 
-// --- Setup card ------------------------------------------------------------
+// --- Hidden setup panel: double-tap / double-click the title ----------------
 
-const REQUIRED_DESTINATIONS = ['PK', 'AE'];
+let lastTap = 0;
+$('title').addEventListener('pointerup', () => {
+  const now = Date.now();
+  if (now - lastTap < 350) {
+    $('setup-card').classList.toggle('show');
+    lastTap = 0;
+  } else {
+    lastTap = now;
+  }
+});
 
-function statusRow(state, label, value, { hint, action } = {}) {
-  const row = el(
+// --- Setup status (automatic) -------------------------------------------------
+
+function statusRow(state, label, value, hint) {
+  return el(
     'div',
-    { className: 'row' },
-    el('div', { className: 'label' }, el('span', { className: `dot ${state}` }), el('span', { textContent: label })),
-    action || el('div', { className: 'value', textContent: value ?? '' })
+    {},
+    el(
+      'div',
+      { className: 'row' },
+      el('div', { className: 'label' }, el('span', { className: `dot ${state}` }), el('span', { textContent: label })),
+      el('div', { className: 'value', textContent: value ?? '' })
+    ),
+    hint ? el('div', { className: 'hint', textContent: hint }) : null
   );
-  const wrap = el('div', {}, row);
-  if (hint) wrap.append(el('div', { className: 'hint', textContent: hint }));
-  return wrap;
-}
-
-function actionButton(text, onClick, disabled = false) {
-  const button = el('button', { className: 'small', textContent: text, type: 'button', disabled });
-  button.addEventListener('click', () => withBusy(button, onClick));
-  return button;
 }
 
 async function loadStatus() {
   const s = await api('GET', '/api/status');
   const rows = [];
 
-  rows.push(statusRow(s.telnyxKey ? 'ok' : 'bad', 'Telnyx API key', s.telnyxKey ? 'Set' : 'Missing', {
-    hint: s.telnyxKey ? null : 'Set TELNYX_API_KEY in the server environment.',
-  }));
-  rows.push(statusRow(s.geminiKey ? 'ok' : 'bad', 'Gemini API key', s.geminiKey ? `Set · ${s.model}` : 'Missing', {
-    hint: s.geminiKey ? null : 'Set GEMINI_API_KEY in the server environment.',
-  }));
-  rows.push(statusRow(s.publicUrl ? 'ok' : 'warn', 'Public URL', s.publicUrl || 'None', {
-    hint: s.publicUrl ? null : 'Running locally: you can verify numbers and allow countries here; calls need the Render deploy.',
-  }));
-
-  if (s.app) {
-    rows.push(statusRow('ok', 'Call Control App', s.app.name));
-  } else if (s.telnyxKey) {
-    rows.push(statusRow('bad', 'Call Control App', '', {
-      hint: s.publicUrl
-        ? 'Creates "gemini-bridge" with webhooks pointing at this server.'
-        : 'Needs the public URL, so create it from the deployed site.',
-      action: actionButton('Create app', createApp, !s.publicUrl),
-    }));
-  }
-
+  rows.push(statusRow(s.telnyxKey ? 'ok' : 'bad', 'Telnyx key', s.telnyxKey ? 'Connected' : 'Missing'));
+  rows.push(statusRow(s.geminiKey ? 'ok' : 'bad', 'Gemini key', s.geminiKey ? `Connected · ${s.model}` : 'Missing'));
+  rows.push(statusRow(s.publicUrl ? 'ok' : 'warn', 'Online address', s.publicUrl || 'Running on this computer',
+    s.publicUrl ? null : 'Calls work only on the online (Render) version.'));
+  rows.push(s.app
+    ? statusRow('ok', 'Telnyx call app', s.app.name)
+    : statusRow('warn', 'Telnyx call app', 'Not yet', 'Created automatically when the online version starts.'));
   if (s.profile) {
-    const missing = REQUIRED_DESTINATIONS.filter((c) => !s.profile.destinations.includes(c));
-    const value = s.profile.destinations.join(', ') || 'None';
-    rows.push(missing.length
-      ? statusRow('warn', 'Allowed countries', value, {
-          hint: `Profile "${s.profile.name}" allows ${value}. Pakistan/UAE calls are blocked until added.`,
-          action: actionButton(`Allow ${missing.join(' + ')}`, () => allowCountries(missing)),
-        })
-      : statusRow('ok', 'Allowed countries', value));
+    const missing = s.autoCountries.filter((c) => !s.profile.destinations.includes(c));
+    rows.push(statusRow(missing.length ? 'warn' : 'ok', 'Countries you can call', s.profile.destinations.join(', ') || 'None',
+      missing.length ? `${missing.join(', ')} will be added automatically.` : 'Any other country is added automatically when you call it.'));
   }
-
-  if (s.balance) rows.push(statusRow('ok', 'Balance', `${s.balance.amount} ${s.balance.currency}`));
-  for (const error of s.errors) rows.push(statusRow('bad', 'Telnyx error', '', { hint: error }));
-
+  if (s.balance) rows.push(statusRow('ok', 'Telnyx balance', `${s.balance.amount} ${s.balance.currency}`));
+  for (const warning of s.warnings) rows.push(statusRow('bad', 'Needs your action', '', warning));
+  for (const error of s.errors) rows.push(statusRow('bad', 'Telnyx problem', '', error));
   $('status-rows').replaceChildren(...rows);
+
+  const problems = [];
+  if (!s.telnyxKey) problems.push('the Telnyx key is missing');
+  if (!s.geminiKey) problems.push('the Gemini key is missing');
+  if (s.errors.length) problems.push('Telnyx reported a problem');
+  let text = '';
+  if (s.warnings.length) text = s.warnings.join(' ');
+  else if (problems.length) text = `Setup needs attention: ${problems.join(', ')}. Double-tap "Voice Bridge" for details.`;
+  else if (!s.publicUrl) text = 'You\'re on the computer version: you can add your number here, but calls work only on the online version.';
+  renderNotice(text);
   return s;
 }
 
-async function createApp() {
-  try {
-    const { created } = await api('POST', '/api/setup/call-control-app');
-    showMsg($('setup-msg'), 'ok', created ? 'Call Control App created.' : 'A Call Control App already exists.');
-    await loadStatus();
-  } catch (err) {
-    showMsg($('setup-msg'), 'bad', err.message);
-  }
+// Shows the banner text, turning any https:// URL in it into a link.
+function renderNotice(text) {
+  const notice = $('notice');
+  notice.replaceChildren(
+    ...text.split(/(https:\/\/\S+?)(?=[\s,]|$)/).map((part) =>
+      part.startsWith('https://') ? el('a', { href: part, textContent: part, target: '_blank', rel: 'noopener' }) : part
+    )
+  );
+  notice.classList.toggle('show', Boolean(text));
 }
 
-async function allowCountries(countries) {
-  try {
-    const { profile } = await api('POST', '/api/setup/allow-destinations', { countries });
-    showMsg($('setup-msg'), 'ok', `Allowed countries are now: ${profile.destinations.join(', ')}.`);
-    await loadStatus();
-  } catch (err) {
-    showMsg($('setup-msg'), 'bad', err.message);
-  }
-}
-
-$('refresh-status').addEventListener('click', (e) =>
-  withBusy(e.currentTarget, () => loadStatus().catch((err) => showMsg($('setup-msg'), 'bad', err.message)))
+$('rerun-setup').addEventListener('click', (e) =>
+  withBusy(e.currentTarget, async () => {
+    try {
+      const { changes, warnings } = await api('POST', '/api/setup/auto');
+      await loadStatus();
+      if (warnings.length) showMsg($('setup-msg'), 'bad', warnings.join(' '));
+      else showMsg($('setup-msg'), 'ok', changes.length ? `Done: ${changes.join('; ')}.` : 'Everything is already set up.');
+    } catch (err) {
+      showMsg($('setup-msg'), 'bad', err.message);
+    }
+  })
 );
 
-// --- Caller IDs card -------------------------------------------------------
+// --- Your number -------------------------------------------------------------
 
 async function loadCallerIds(select) {
   const { callerIds, defaultCallerId } = await api('GET', '/api/caller-ids');
@@ -184,8 +181,8 @@ async function loadCallerIds(select) {
       ? callerIds.map((c) =>
           el('div', { className: 'num' },
             el('span', { textContent: c.number }),
-            el('span', { className: `badge ${c.kind}`, textContent: c.kind === 'owned' ? 'Telnyx number' : 'Verified' })))
-      : [el('div', { className: 'empty', textContent: 'No verified numbers yet. Verify your number below.' })])
+            el('span', { className: 'badge', textContent: c.kind === 'owned' ? 'Telnyx number' : 'Ready' })))
+      : [el('div', { className: 'empty', textContent: 'No number added yet. Add yours below.' })])
   );
 
   const fromSelect = $('from');
@@ -193,7 +190,7 @@ async function loadCallerIds(select) {
   fromSelect.replaceChildren(
     ...(callerIds.length
       ? callerIds.map((c) => el('option', { value: c.number, textContent: c.number }))
-      : [el('option', { value: '', textContent: 'Verify a number first' })])
+      : [el('option', { value: '', textContent: 'Add your number first' })])
   );
   if (callerIds.some((c) => c.number === preferred)) fromSelect.value = preferred;
 }
@@ -206,18 +203,21 @@ let pendingNumber = null;
 
 $('verify-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const number = $('verify-number').value.replace(/[\s()-]/g, '');
   const method = new FormData(e.currentTarget).get('method');
   await withBusy($('send-code'), async () => {
     try {
-      await api('POST', '/api/caller-ids/verify', { phone_number: number, method });
-      pendingNumber = number;
-      $('confirm-number').textContent = number;
+      const { phoneNumber } = await api('POST', '/api/caller-ids/verify', {
+        phone_number: $('verify-number').value,
+        method,
+      });
+      pendingNumber = phoneNumber;
+      $('confirm-number').textContent = phoneNumber;
       $('verify-form').hidden = true;
       $('confirm-form').hidden = false;
       $('verify-code').value = '';
       $('verify-code').focus();
-      showMsg($('verify-msg'), 'ok', method === 'sms' ? 'Code sent by SMS.' : 'Telnyx is calling the number with the code.');
+      showMsg($('verify-msg'), 'ok',
+        method === 'sms' ? `We texted a code to ${phoneNumber}.` : `We're calling ${phoneNumber} now to read out the code.`);
     } catch (err) {
       showMsg($('verify-msg'), 'bad', err.message);
     }
@@ -226,11 +226,10 @@ $('verify-form').addEventListener('submit', async (e) => {
 
 $('confirm-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const button = e.submitter;
-  await withBusy(button, async () => {
+  await withBusy(e.submitter, async () => {
     try {
       await api('POST', `/api/caller-ids/${encodeURIComponent(pendingNumber)}/confirm`, { code: $('verify-code').value });
-      showMsg($('verify-msg'), 'ok', `${pendingNumber} is verified and can be used as caller ID.`);
+      showMsg($('verify-msg'), 'ok', `Done! ${pendingNumber} is ready to use.`);
       resetVerify();
       await loadCallerIds(pendingNumber);
     } catch (err) {
@@ -250,14 +249,14 @@ $('cancel-verify').addEventListener('click', () => {
   hideMsg($('verify-msg'));
 });
 
-// --- Place a call card -----------------------------------------------------
+// --- Call someone -------------------------------------------------------------
 
 $('to').value = store.get('vb.to') || '';
 
 $('call-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const from = $('from').value;
-  const to = $('to').value.replace(/[\s()-]/g, '');
+  const to = $('to').value.trim();
   hideMsg($('call-msg'));
   await withBusy($('call-btn'), async () => {
     try {
@@ -265,7 +264,7 @@ $('call-form').addEventListener('submit', async (e) => {
       store.set('vb.from', from);
       store.set('vb.to', to);
       live.callId = callControlId;
-      showMsg($('call-msg'), 'ok', 'Dialing…');
+      showMsg($('call-msg'), 'ok', 'Calling…');
     } catch (err) {
       showMsg($('call-msg'), 'bad', err.message);
     }
@@ -283,13 +282,13 @@ $('hangup-btn').addEventListener('click', (e) =>
   })
 );
 
-// --- Live call card --------------------------------------------------------
+// --- Conversation -------------------------------------------------------------
 
 const STEPS = [
-  ['dialing', 'Dialing'],
+  ['dialing', 'Calling'],
   ['ringing', 'Ringing'],
-  ['answered', 'Answered'],
-  ['streaming', 'AI connected'],
+  ['answered', 'Picked up'],
+  ['streaming', 'AI is talking'],
   ['ended', 'Ended'],
 ];
 
@@ -305,7 +304,6 @@ function resetLive(callId, meta) {
 }
 
 function renderTimeline() {
-  const failed = live.state === 'error';
   $('timeline').replaceChildren(
     ...STEPS.map(([key, label]) => {
       let cls = 'step';
@@ -313,7 +311,7 @@ function renderTimeline() {
       else if (live.reached.has(key)) cls += ' done';
       return el('span', { className: cls, textContent: label });
     }),
-    ...(failed ? [el('span', { className: 'step failed', textContent: 'Failed' })] : [])
+    ...(live.state === 'error' ? [el('span', { className: 'step failed', textContent: 'Problem' })] : [])
   );
   const active = live.callId && !['ended', 'error'].includes(live.state);
   $('hangup-btn').hidden = !active;
@@ -333,7 +331,7 @@ function scrollTranscript() {
 
 function handleEvent(event) {
   if (event.type === 'call') {
-    if (event.state === 'dialing') resetLive(event.callId, `${event.from} → ${event.to}`);
+    if (event.state === 'dialing') resetLive(event.callId, `From ${event.from} to ${event.to}`);
     if (event.callId !== live.callId) return;
     live.state = event.state;
     live.reached.add(event.state);
@@ -351,16 +349,15 @@ function handleEvent(event) {
   if (event.type === 'transcript') {
     const speaker = event.speaker === 'ai' ? 'ai' : 'caller';
     if (!live.lastBubble || live.lastBubble.dataset.speaker !== speaker) {
-      const text = el('span');
       live.lastBubble = el('div', { className: `bubble ${speaker}` },
-        el('span', { className: 'who', textContent: speaker === 'ai' ? 'AI' : 'Caller' }), text);
+        el('span', { className: 'who', textContent: speaker === 'ai' ? 'AI' : 'Them' }), el('span'));
       live.lastBubble.dataset.speaker = speaker;
       $('transcript').append(live.lastBubble);
     }
     live.lastBubble.lastChild.textContent += event.text;
     scrollTranscript();
   } else if (event.type === 'interrupted') {
-    addNote('Caller interrupted the AI');
+    addNote('They spoke over the AI, so it stopped to listen');
   }
 }
 
@@ -370,7 +367,7 @@ async function streamEvents() {
   for (;;) {
     try {
       const res = await fetch('/api/events', { headers: { Authorization: `Bearer ${token}` } });
-      if (res.status === 401) return showLogin('That token was rejected. Sign in again.');
+      if (res.status === 401) return showLogin('That access code didn\'t work. Please try again.');
       resetLive(null, 'No call yet.');
       renderTimeline();
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();

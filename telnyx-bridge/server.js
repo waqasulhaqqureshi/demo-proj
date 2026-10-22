@@ -9,9 +9,16 @@ import { WebSocketServer } from 'ws';
 import { createDownsampler, createUpsampler, MULAW_SILENCE } from './audio.js';
 import { publish, recentEvents, subscribe } from './events.js';
 import { openGeminiSession } from './gemini.js';
+import { parsePhone } from './phone.js';
 import * as tx from './telnyx.js';
 
 const PORT = Number(process.env.PORT) || 8080;
+// Destination countries the outbound voice profile is kept open for. The
+// destination of each call is also allowed automatically when it is dialed.
+const AUTO_ALLOW_COUNTRIES = (process.env.AUTO_ALLOW_COUNTRIES || 'PK,AE')
+  .split(',')
+  .map((c) => c.trim().toUpperCase())
+  .filter(Boolean);
 const DEFAULT_SYSTEM_PROMPT =
   'You are a friendly, professional AI voice assistant on a phone call. ' +
   'As soon as the call starts, greet the person warmly in Arabic, say you are an AI assistant, and ask how you can help. ' +
@@ -60,7 +67,65 @@ const wrap = (handler) => (req, res) =>
 
 app.use('/api', requireAdmin);
 
-// --- Setup status & one-click fixes -----------------------------------------
+// --- Automatic Telnyx setup --------------------------------------------------
+
+// Makes the Telnyx account ready to place calls: opens the needed destination
+// countries on the outbound voice profile and, once this server has a public
+// URL, creates the Call Control App (or re-points its webhook). Idempotent;
+// concurrent callers share one run so the app is never created twice.
+let setupRun = null;
+let lastSetupWarnings = [];
+
+const countryNames = new Intl.DisplayNames(['en'], { type: 'region' });
+const describeCountries = (codes) => codes.map((c) => countryNames.of(c) || c).join(' and ');
+
+function ensureTelnyxSetup(extraCountries = []) {
+  const run = (setupRun || Promise.resolve()).catch(() => {}).then(async () => {
+    const changes = [];
+    const warnings = [];
+    let blocked = [];
+    let callApp = await tx.resolveCallControlApp({ refresh: true });
+    const profile = await tx.resolveOutboundProfile(callApp);
+    if (!profile) throw new Error('No enabled Outbound Voice Profile on the Telnyx account.');
+
+    const allowed = profile.whitelisted_destinations || [];
+    const missing = [...new Set([...AUTO_ALLOW_COUNTRIES, ...extraCountries])].filter((c) => !allowed.includes(c));
+    if (missing.length) {
+      try {
+        await tx.allowDestinations(profile, missing);
+        changes.push(`allowed calls to ${missing.join(', ')} on profile "${profile.name}"`);
+      } catch (err) {
+        blocked = missing;
+        // 10039: the account level doesn't permit these destinations yet.
+        warnings.push(
+          err.errors?.some((e) => String(e.code) === '10039')
+            ? `Your Telnyx account must be upgraded before it can call ${describeCountries(missing)}. Upgrade at https://telnyx.com/upgrade, and the countries will be added automatically afterwards.`
+            : `Could not allow calls to ${describeCountries(missing)}: ${err.message}`
+        );
+      }
+    }
+
+    const webhookUrl = publicUrl() && `${publicUrl()}/webhook`;
+    if (webhookUrl && !callApp) {
+      callApp = await tx.createCallControlApp({ webhookUrl, outboundVoiceProfileId: profile.id });
+      changes.push(`created Call Control App ${callApp.id}`);
+    } else if (
+      webhookUrl &&
+      callApp.application_name === tx.APP_NAME &&
+      (callApp.webhook_event_url !== webhookUrl || callApp.webhook_api_version !== '2')
+    ) {
+      callApp = await tx.updateCallControlAppWebhook(callApp, webhookUrl);
+      changes.push(`pointed Call Control App webhooks at ${webhookUrl}`);
+    }
+
+    for (const change of changes) console.log(`[setup] ${change}`);
+    for (const warning of warnings) console.warn(`[setup] ${warning}`);
+    lastSetupWarnings = warnings;
+    return { app: callApp, changes, warnings, blocked };
+  });
+  setupRun = run;
+  return run;
+}
 
 app.get(
   '/api/status',
@@ -72,6 +137,8 @@ app.get(
       model: process.env.GEMINI_MODEL || 'gemini-3.8-live',
       voice: process.env.GEMINI_VOICE || 'Kore',
       defaultCallerId: process.env.CALLER_ID || null,
+      autoCountries: AUTO_ALLOW_COUNTRIES,
+      warnings: lastSetupWarnings,
       app: null,
       profile: null,
       balance: null,
@@ -108,40 +175,10 @@ app.get(
 );
 
 app.post(
-  '/api/setup/call-control-app',
+  '/api/setup/auto',
   wrap(async (_req, res) => {
-    if (!publicUrl()) {
-      return res.status(400).json({
-        error: 'This server has no public URL yet. Deploy to Render (or set PUBLIC_URL to an https tunnel) first.',
-      });
-    }
-    const existing = await tx.resolveCallControlApp({ refresh: true });
-    if (existing) return res.json({ app: existing, created: false });
-
-    const profile = await tx.resolveOutboundProfile(null);
-    if (!profile) return res.status(400).json({ error: 'No enabled Outbound Voice Profile found on the Telnyx account.' });
-
-    const created = await tx.createCallControlApp({
-      webhookUrl: `${publicUrl()}/webhook`,
-      outboundVoiceProfileId: profile.id,
-    });
-    console.log(`[setup] created Call Control App ${created.id} linked to profile "${profile.name}"`);
-    res.json({ app: created, created: true });
-  })
-);
-
-app.post(
-  '/api/setup/allow-destinations',
-  wrap(async (req, res) => {
-    const countries = (req.body?.countries || []).filter((c) => /^[A-Z]{2}$/.test(c));
-    if (!countries.length) return res.status(400).json({ error: 'Pass countries as ISO alpha-2 codes, e.g. ["PK","AE"].' });
-
-    const profile = await tx.resolveOutboundProfile(await tx.resolveCallControlApp());
-    if (!profile) return res.status(400).json({ error: 'No enabled Outbound Voice Profile found on the Telnyx account.' });
-
-    const updated = await tx.allowDestinations(profile, countries);
-    console.log(`[setup] profile "${updated.name}" destinations: ${updated.whitelisted_destinations.join(', ')}`);
-    res.json({ profile: { id: updated.id, name: updated.name, destinations: updated.whitelisted_destinations } });
+    const { changes, warnings } = await ensureTelnyxSetup();
+    res.json({ changes, warnings });
   })
 );
 
@@ -163,10 +200,14 @@ app.get(
 app.post(
   '/api/caller-ids/verify',
   wrap(async (req, res) => {
-    const { phone_number: phoneNumber, method } = req.body || {};
-    if (!tx.isE164(phoneNumber)) return res.status(400).json({ error: 'Use E.164 format, e.g. +923001234567.' });
-    if (!['sms', 'call'].includes(method)) return res.status(400).json({ error: 'Method must be "sms" or "call".' });
-    res.json(await tx.requestVerification(phoneNumber, method));
+    const phone = parsePhone(req.body?.phone_number);
+    const method = req.body?.method;
+    if (!phone) {
+      return res.status(400).json({ error: 'That number doesn\'t look right. Start with + and the country code, e.g. +92 300 1234567.' });
+    }
+    if (!['sms', 'call'].includes(method)) return res.status(400).json({ error: 'Choose text message or phone call.' });
+    await tx.requestVerification(phone.e164, method);
+    res.json({ phoneNumber: phone.e164 });
   })
 );
 
@@ -182,33 +223,30 @@ app.post(
 // --- Calls -----------------------------------------------------------------
 
 const placeCall = wrap(async (req, res) => {
-  const to = String(req.body?.to || '').trim();
-  const from = String(req.body?.from || process.env.CALLER_ID || '').trim();
-  if (!tx.isE164(to)) return res.status(400).json({ error: '"to" must be in E.164 format, e.g. +923001234567.' });
-  if (!tx.isE164(from)) return res.status(400).json({ error: 'Choose a caller ID ("from") in E.164 format.' });
+  const target = parsePhone(req.body?.to);
+  const caller = parsePhone(req.body?.from || process.env.CALLER_ID);
+  if (!target) {
+    return res.status(400).json({ error: 'The number to call doesn\'t look right. Start with + and the country code, e.g. +92 300 1234567.' });
+  }
+  if (!caller) return res.status(400).json({ error: 'Pick the number to call from.' });
   if (!publicUrl()) {
-    return res.status(400).json({ error: 'No public URL: Telnyx cannot reach this server for webhooks and audio.' });
+    return res.status(400).json({ error: 'Calls only work on the online (Render) version of this page.' });
   }
 
   const callerIdList = await callerIds();
-  if (!callerIdList.some((c) => c.number === from)) {
+  if (!callerIdList.some((c) => c.number === caller.e164)) {
     return res.status(400).json({
-      error: `${from} is not verified or owned on this Telnyx account, so Telnyx would reject it (403 D51). Verify it under Caller IDs first.`,
+      error: `${caller.e164} isn't confirmed yet, so the call would be blocked. Add it under "Your number" first.`,
     });
   }
 
-  const callApp = await tx.resolveCallControlApp({ refresh: true });
-  if (!callApp) return res.status(400).json({ error: 'No Call Control App yet. Use "Create app" in the Setup card.' });
+  // Opens the destination's country and makes sure the call app exists.
+  const { app: callApp, blocked, warnings } = await ensureTelnyxSetup(target.country ? [target.country] : []);
+  if (blocked.includes(target.country)) return res.status(400).json({ error: warnings.join(' ') });
+  if (!callApp) return res.status(500).json({ error: 'Could not set up the Telnyx call app. Check the server logs.' });
 
-  const country = tx.countryOf(to);
-  const profile = await tx.resolveOutboundProfile(callApp);
-  const allowed = profile?.whitelisted_destinations || [];
-  if (country && profile && !allowed.includes(country) && !(country === 'US' && allowed.includes('CA'))) {
-    return res.status(400).json({
-      error: `Outbound profile "${profile.name}" does not allow calls to ${country} (allowed: ${allowed.join(', ')}). Add it in the Setup card.`,
-    });
-  }
-
+  const to = target.e164;
+  const from = caller.e164;
   const call = await tx.dial({ connectionId: callApp.id, to, from, webhookUrl: `${publicUrl()}/webhook` });
   activeCalls.set(call.call_control_id, { to, from, state: 'dialing' });
   publish('call', { callId: call.call_control_id, state: 'dialing', to, from });
@@ -430,8 +468,10 @@ server.listen(PORT, () => {
     if (!process.env[key]) console.warn(`[server] ${key} is not set`);
   }
   if (process.env.TELNYX_API_KEY) {
-    tx.resolveCallControlApp()
-      .then((a) => console.log(`[server] Call Control App: ${a ? `${a.application_name} (${a.id})` : 'none yet — use "Create app" in the UI'}`))
-      .catch((err) => console.warn('[server] could not look up Call Control Apps:', err.message));
+    ensureTelnyxSetup()
+      .then(({ app: a }) =>
+        console.log(`[setup] Call Control App: ${a ? `${a.application_name} (${a.id})` : 'created automatically once the server has a public URL'}`)
+      )
+      .catch((err) => console.warn('[setup] automatic Telnyx setup failed:', err.message));
   }
 });
