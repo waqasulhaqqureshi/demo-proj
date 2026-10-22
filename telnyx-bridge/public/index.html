@@ -119,8 +119,9 @@
     .system-note { align-self: center; font-size: 12.5px; color: var(--muted); }
     #setup-card { display: none; border-style: dashed; }
     #setup-card.show { display: block; }
-    #login { position: fixed; inset: 0; background: linear-gradient(180deg, var(--tint), var(--page)); display: none; align-items: center; justify-content: center; padding: 16px; }
+    #login { position: fixed; inset: 0; z-index: 100; background: linear-gradient(180deg, var(--tint), var(--page)); display: none; align-items: center; justify-content: center; padding: 16px; }
     #login.show { display: flex; }
+    body:has(#login.show) { overflow: hidden; }
     #login .card { width: 100%; max-width: 380px; }
     code { font-size: 12.5px; background: var(--green-softer); padding: 1px 5px; border-radius: 4px; }
   </style>
